@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -7,6 +8,9 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "devices/input.h"
 
 static void syscall_handler (struct intr_frame *);
 void exit(int status);
@@ -24,6 +28,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
   //printf("syscall num %d\n",*(uint32_t*)(f->esp));
   struct thread *t = thread_current();
+  struct file *fp;
   //protect user memory accesses from system calls
   //Method 1 : verify the validity of a user-provided pointer
   if(!is_user_vaddr(f->esp)||pagedir_get_page(t->pagedir, f->esp) == NULL)
@@ -31,6 +36,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 
   //system call
   //1 : halt, exit, exec, wait, read, write
+  //2 : create, remove, open, close, filesize, read, write, seek, tell
   int system_number = *(int *)(f->esp);
   //hex_dump(f->esp, f->esp, 1000, 1);
   switch (system_number){
@@ -54,6 +60,76 @@ syscall_handler (struct intr_frame *f UNUSED)
 			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
 				exit(-1);
 			f->eax = process_wait(*(tid_t *)(f->esp+4)); break;
+	  
+	  case SYS_CREATE:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(!is_user_vaddr((*(char**)(f->esp+4))) || pagedir_get_page(t->pagedir, (*(char **)(f->esp+4))) == NULL)
+				exit(-1);
+			if(!is_user_vaddr(f->esp+8) || pagedir_get_page(t->pagedir, f->esp+8) == NULL)
+				exit(-1);
+			if(*(char **)(f->esp+4) == NULL) exit(-1);
+			f->eax = filesys_create(*(char **)(f->esp+4), *(off_t *)(f->esp+8));
+			break;
+
+	  case SYS_REMOVE:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(!is_user_vaddr((*(char**)(f->esp+4))) || pagedir_get_page(t->pagedir, (*(char **)(f->esp+4))) == NULL)
+				exit(-1);
+			if(*(char **)(f->esp+4) == NULL) exit(-1);
+			f->eax = filesys_remove(*(char **)(f->esp+4));
+			break;
+
+	  case SYS_OPEN:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(!is_user_vaddr(*(char**)(f->esp+4)) || pagedir_get_page(t->pagedir, *(char **)(f->esp+4)) == NULL)
+				exit(-1);
+			if(*(char **)(f->esp+4) == NULL) exit(-1);
+			fp = filesys_open(*(char **)(f->esp+4));
+			if(fp == NULL) f->eax = -1;
+			else{
+				f->eax = -1;
+				for(int i=3;i<131;i++){
+					if(thread_current()->fn[i] == NULL){
+						if(!strcmp(thread_current()->name, *(char **)(f->esp+4))) file_deny_write(fp);
+						thread_current()->fn[i] = fp;
+						f->eax = i;
+						break;
+					}
+				}
+			}	
+			break;
+
+	  case SYS_FILESIZE:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			fp = thread_current()->fn[*(int *)(f->esp+4)];
+			if(fp == NULL) exit(-1);
+			else f->eax = file_length(fp);
+			break;
+
+	  case SYS_READ:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(!is_user_vaddr(f->esp+8) || pagedir_get_page(t->pagedir, f->esp+8) == NULL)
+				exit(-1);
+			if(!is_user_vaddr(f->esp+12) || pagedir_get_page(t->pagedir, f->esp+12) == NULL)
+				exit(-1);
+			if(!is_user_vaddr((*(char **)(f->esp+8))) || pagedir_get_page(t->pagedir, (*(char **)(f->esp+8))) == NULL)
+				exit(-1);
+			f->eax = -1;//initialize
+			if((int)*(uint32_t *)(f->esp+4) == 0){
+				for(int i = 0;i< *(int *)(f->esp+12);i++)
+					(*(char **)(f->esp+8))[i] = input_getc();
+				f->eax = *(int *)(f->esp+12);
+			}
+			else if((int)*(uint32_t *)(f->esp+4) > 2){
+				if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+				f->eax = file_read(thread_current()->fn[*(int *)(f->esp+4)], *(void **)(f->esp+8), *(off_t *)(f->esp+12));
+			}
+			break;
 
 	  case SYS_WRITE:
 			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
@@ -64,12 +140,42 @@ syscall_handler (struct intr_frame *f UNUSED)
 				exit(-1);
 			if(!is_user_vaddr((void *)*(uint32_t *)(f->esp+8) || pagedir_get_page(t->pagedir, (void *)*(uint32_t *)(f->esp+8)) == NULL))
 				exit(-1);
+			f->eax = -1;
 			if((int)*(uint32_t *)(f->esp+4) == 1){
 				putbuf((void *)*(uint32_t *)(f->esp+8), *(size_t *)(f->esp+12));
 			}
+			else if((int)*(uint32_t *)(f->esp+4) > 2){
+				if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+				if(thread_current()->fn[*(int *)(f->esp+4)]->deny_write) 
+					file_deny_write(thread_current()->fn[*(int *)(f->esp+4)]);
+				f->eax = file_write(thread_current()->fn[*(int *)(f->esp+4)], *(void **)(f->esp+8), *(off_t *)(f->esp+12));
+			}
 			break;
-	  case SYS_READ:
+
+	  case SYS_SEEK:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(!is_user_vaddr(f->esp+8) || pagedir_get_page(t->pagedir, f->esp+8) == NULL)
+				exit(-1);
+			if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+			file_seek(thread_current()->fn[*(int *)(f->esp+4)], *(off_t *)(f->esp+8));
 			break;
+
+	  case SYS_TELL:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+			f->eax = file_tell(thread_current()->fn[*(int *)(f->esp+4)]);
+			break;
+
+	  case SYS_CLOSE:
+			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
+				exit(-1);
+			if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+			file_close(thread_current()->fn[*(int *)(f->esp+4)]);
+			thread_current()->fn[*(int *)(f->esp+4)] = NULL;//close file
+			break;
+
 	  case SYS_FIBONACCI:
 			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
 				exit(-1);

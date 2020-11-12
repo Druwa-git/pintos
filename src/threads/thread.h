@@ -5,7 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
-
+#include "filesys/file.h"
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -102,12 +102,12 @@ struct thread
 	struct list child;
 	struct list_elem child_elem;
 	int exit_status;
+	struct file *fn[131];
 	/* Page directory. */
 #endif
 
     /* Owned by thread.c. */
     unsigned magic; /* Detects stack overflow. */
-	/* user */
   };
 
 /* If false (default), use round-robin scheduler.

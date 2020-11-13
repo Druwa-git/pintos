@@ -11,6 +11,7 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "devices/input.h"
+#include "threads/synch.h"
 
 static void syscall_handler (struct intr_frame *);
 void exit(int status);
@@ -20,6 +21,7 @@ int max_of_four_int(int n1, int n2, int n3, int n4);
 void
 syscall_init (void) 
 {
+  lock_init(&file_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -59,7 +61,8 @@ syscall_handler (struct intr_frame *f UNUSED)
 				exit(-1);
 			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
 				exit(-1);
-			f->eax = process_wait(*(tid_t *)(f->esp+4)); break;
+			f->eax = process_wait(*(tid_t *)(f->esp+4)); 
+			break;
 	  
 	  case SYS_CREATE:
 			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
@@ -87,10 +90,11 @@ syscall_handler (struct intr_frame *f UNUSED)
 			if(!is_user_vaddr(*(char**)(f->esp+4)) || pagedir_get_page(t->pagedir, *(char **)(f->esp+4)) == NULL)
 				exit(-1);
 			if(*(char **)(f->esp+4) == NULL) exit(-1);
+			f->eax = -1;
+			lock_acquire(&file_lock);
 			fp = filesys_open(*(char **)(f->esp+4));
 			if(fp == NULL) f->eax = -1;
 			else{
-				f->eax = -1;
 				for(int i=3;i<131;i++){
 					if(thread_current()->fn[i] == NULL){
 						if(!strcmp(thread_current()->name, *(char **)(f->esp+4))) file_deny_write(fp);
@@ -100,6 +104,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 					}
 				}
 			}	
+			lock_release(&file_lock);
 			break;
 
 	  case SYS_FILESIZE:
@@ -120,15 +125,20 @@ syscall_handler (struct intr_frame *f UNUSED)
 			if(!is_user_vaddr((*(char **)(f->esp+8))) || pagedir_get_page(t->pagedir, (*(char **)(f->esp+8))) == NULL)
 				exit(-1);
 			f->eax = -1;//initialize
+			lock_acquire(&file_lock);
 			if((int)*(uint32_t *)(f->esp+4) == 0){
 				for(int i = 0;i< *(int *)(f->esp+12);i++)
 					(*(char **)(f->esp+8))[i] = input_getc();
 				f->eax = *(int *)(f->esp+12);
 			}
 			else if((int)*(uint32_t *)(f->esp+4) > 2){
-				if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+				if(thread_current()->fn[*(int *)(f->esp+4)] == NULL){
+					lock_release(&file_lock); 
+					exit(-1);
+				}
 				f->eax = file_read(thread_current()->fn[*(int *)(f->esp+4)], *(void **)(f->esp+8), *(off_t *)(f->esp+12));
 			}
+			lock_release(&file_lock);
 			break;
 
 	  case SYS_WRITE:
@@ -141,15 +151,19 @@ syscall_handler (struct intr_frame *f UNUSED)
 			if(!is_user_vaddr((void *)*(uint32_t *)(f->esp+8) || pagedir_get_page(t->pagedir, (void *)*(uint32_t *)(f->esp+8)) == NULL))
 				exit(-1);
 			f->eax = -1;
+			lock_acquire(&file_lock);
 			if((int)*(uint32_t *)(f->esp+4) == 1){
 				putbuf((void *)*(uint32_t *)(f->esp+8), *(size_t *)(f->esp+12));
 			}
 			else if((int)*(uint32_t *)(f->esp+4) > 2){
-				if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+				if(thread_current()->fn[*(int *)(f->esp+4)] == NULL){ 
+					lock_release(&file_lock); exit(-1);
+				}
 				if(thread_current()->fn[*(int *)(f->esp+4)]->deny_write) 
 					file_deny_write(thread_current()->fn[*(int *)(f->esp+4)]);
 				f->eax = file_write(thread_current()->fn[*(int *)(f->esp+4)], *(void **)(f->esp+8), *(off_t *)(f->esp+12));
 			}
+			lock_release(&file_lock);
 			break;
 
 	  case SYS_SEEK:
@@ -172,8 +186,10 @@ syscall_handler (struct intr_frame *f UNUSED)
 			if(!is_user_vaddr(f->esp+4) || pagedir_get_page(t->pagedir, f->esp+4) == NULL)
 				exit(-1);
 			if(thread_current()->fn[*(int *)(f->esp+4)] == NULL) exit(-1);
+			//lock_acquire(&file_lock);
 			file_close(thread_current()->fn[*(int *)(f->esp+4)]);
 			thread_current()->fn[*(int *)(f->esp+4)] = NULL;//close file
+			//lock_release(&file_lock);
 			break;
 
 	  case SYS_FIBONACCI:

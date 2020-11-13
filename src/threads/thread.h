@@ -104,6 +104,7 @@ struct thread
 	struct list child;
 	struct list_elem child_elem;
 	int exit_status;
+	int wait_status;
 	struct file *fn[131];
 	/* Page directory. */
 #endif

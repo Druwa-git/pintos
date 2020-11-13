@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -41,19 +42,28 @@ process_execute (const char *file_name)
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /* user */
-  char *file_name_ptr = NULL, *ptr_tok;
-  file_name_ptr = palloc_get_page (0);
-  strlcpy(file_name_ptr, file_name, PGSIZE);
-  strtok_r(file_name_ptr, " ", &ptr_tok);
+  char *file_name_ptr, *ptr_tok;
+  char temp_name[130];
+  //file_name_ptr = palloc_get_page (0);
+  strlcpy(temp_name, file_name, strlen(file_name)+1);
+  file_name_ptr = strtok_r(temp_name, " ", &ptr_tok);
 
   if(filesys_open(file_name_ptr) == NULL) return -1;
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name_ptr, PRI_DEFAULT, start_process, fn_copy);
-  sema_down(&thread_current()->load_lock);
+  sema_down(&thread_current()->load_lock);//for synchronization
   if (tid == TID_ERROR){
     palloc_free_page (fn_copy);
-    palloc_free_page (file_name_ptr);
+    //palloc_free_page (file_name_ptr);
+  }
+  if (tid == -1) return TID_ERROR;
+  //multi-oom
+  struct thread *t;
+  struct list_elem *e;
+  for(e = list_begin(&(thread_current()->child)); e != list_end(&(thread_current()->child));e = list_next(e)){
+	  t = list_entry(e, struct thread, child_elem);
+	  if(t->wait_status == 1) return process_wait(tid);
   }
   return tid;
 }
@@ -77,8 +87,12 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   palloc_free_page (file_name);
   sema_up(&thread_current()->parent->load_lock);
-  if (!success) 
-    thread_exit ();
+  if (!success){ 
+    //thread_exit ();
+	thread_current()->wait_status = 1;
+	exit(-1);
+	//thread_exit();
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -102,11 +116,9 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
-  //int i;
-  //for(i=0;i<1000000000;i++);
   struct list_elem *e;
   struct thread *t = NULL;
-  int exit_status;
+  int exit_status = -1;
   for(e = list_begin(&(thread_current()->child)); e != list_end(&(thread_current()->child));e = list_next(e)){
 	  t = list_entry(e, struct thread, child_elem);
 	  if(child_tid == t->tid){
@@ -381,6 +393,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   //stack return address
   *esp -= 4;
   *(char **)*esp = (char *) 0;
+
+  free(arg_address);
+  free(word_align);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;

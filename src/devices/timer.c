@@ -196,7 +196,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
 	}
 	else e = list_next(e);
   }
-  if (thread_prior_aging){
+  if (thread_prior_aging || thread_mlfqs){
 	  thread_current()->recent_cpu = add_float_int(thread_current()->recent_cpu, 1);
 	  if(timer_ticks() % TIMER_FREQ == 0)
 		  change_load_avg_recent_cpu();

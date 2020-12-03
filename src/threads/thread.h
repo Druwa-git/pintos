@@ -24,9 +24,6 @@ extern bool thread_prior_aging;
 int mul_float_float(int x, int y);
 int div_float_float(int x, int y);
 int max_prior(void);
-int get_nice(void);
-int get_load_avg(void);
-int get_recent_cpu(void);
 void change_load_avg_recent_cpu(void);
 void change_priority(void);
 

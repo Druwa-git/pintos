@@ -355,6 +355,9 @@ thread_set_priority (int new_priority)
 {
   struct thread *cur = thread_current();
   int priority_current = cur->priority;
+  if(thread_mlfqs){
+	  return;
+  }
   cur->priority = new_priority;
   if(new_priority < priority_current) thread_yield();
 }
@@ -368,9 +371,16 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
   /* Not yet implemented. */
+  struct thread *t = thread_current();
+  t->nice = nice;
+  t->priority = sub_float_float(sub_float_float(add_float_int(0,PRI_MAX), div_float_int(t->recent_cpu, 4)), mul_int_float(2, add_float_int(0, t->nice))) / FRACTION;
+
+  if(t->priority > PRI_MAX) t->priority = PRI_MAX;
+  if(t->priority < PRI_MIN) t->priority = PRI_MIN;
+  if(t->priority < max_prior()) thread_yield();
 }
 
 /* Returns the current thread's nice value. */
@@ -378,7 +388,7 @@ int
 thread_get_nice (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
@@ -386,7 +396,7 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return mul_int_float(100, load_avg) / FRACTION;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -394,9 +404,8 @@ int
 thread_get_recent_cpu (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return mul_int_float(100, thread_current()->recent_cpu) / FRACTION;
 }
-
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -547,6 +556,9 @@ next_thread_to_run (void)
    After this function and its caller returns, the thread switch
    is complete. */
 void
+
+
+
 thread_schedule_tail (struct thread *prev)
 {
   struct thread *cur = running_thread ();
@@ -632,15 +644,6 @@ int max_prior(void){
 		priority = t->priority;
 	}
 	return priority;
-}
-int get_nice(void){
-	return thread_current()->nice;
-}
-int get_load_avg(void){
-	return mul_int_float(100, load_avg) / FRACTION;
-}
-int get_recent_cpu(void){
-	return mul_int_float(100, thread_current()->recent_cpu) / FRACTION;
 }
 void change_load_avg_recent_cpu(void){
 	int ready_threads = list_size(&ready_list);

@@ -4,8 +4,33 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "threads/synch.h"
+#include "threads/synch.h" /* Project #3 */
 #include "filesys/file.h"
+
+#ifndef USERPROG
+/* Project #3. */
+extern bool thread_prior_aging;
+#endif
+
+/* user manage fixed pointer (aging) */
+#define FRACTION (1<<14)
+#define sub_int_float(x,y) ((x)*FRACTION - (y))
+#define mul_int_float(x,y) ((x)*(y))
+#define add_float_int(x,y) ((x)+(y)*FRACTION)
+#define add_float_float(x,y) ((x)+(y))
+#define sub_float_float(x,y) ((x)-(y))
+#define div_float_int(x,y) ((x)/(y))
+
+int mul_float_float(int x, int y);
+int div_float_float(int x, int y);
+int max_prior(void);
+int get_nice(void);
+int get_load_avg(void);
+int get_recent_cpu(void);
+void change_load_avg_recent_cpu(void);
+void change_priority(void);
+
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -92,7 +117,11 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+    struct list_elem elem; /* List element. */
+	/* user */
+	int64_t time_to_wakeup;
+	int recent_cpu;
+	int nice;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
